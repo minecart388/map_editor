@@ -10,7 +10,8 @@ from .core import TexMgr, Map, UndoMgr, FileMgr, path
 from .editor_core import ThemeManager, LayerManager, DrawingEngine, Camera, Selection
 from .editor_ui import UIManager
 from .console import ConsoleManager
-from .hotbar import HotbarManager
+from .hotbar import HotbarManager, HotbarConfigWindow
+from .brush import BrushManager
 
 class ToolManager:
     def __init__(self, editor):
@@ -21,6 +22,11 @@ class ToolManager:
         self.fill_tool: str = EMPTY
         self.brush_size: int = 1
         self.selection_mode: bool = False
+        self.clone_mode: bool = False
+        self.clone_source_x: int = 0
+        self.clone_source_y: int = 0
+        self.clone_source_layer: int = 0
+        self.clone_source_valid: bool = False
 
     def set_tool(self, code, from_hotbar: bool = False) -> None:
         self.editor.drawing.cancel_primitive()
@@ -30,6 +36,7 @@ class ToolManager:
             self.pipette_mode = True
             self.flood_mode = False
             self.selection_mode = False
+            self.clone_mode = False
             self.tool = None
             self.editor.update_status()
             return
@@ -39,6 +46,7 @@ class ToolManager:
                 self.flood_mode = True
                 self.pipette_mode = False
                 self.selection_mode = False
+                self.clone_mode = False
                 self.editor.update_status()
             else:
                 self.editor.console._print("Сначала выберите текстуру для заливки", "error")
@@ -47,12 +55,22 @@ class ToolManager:
             self.selection_mode = True
             self.pipette_mode = False
             self.flood_mode = False
+            self.clone_mode = False
+            self.tool = None
+            self.editor.update_status()
+            return
+        if code == -4:
+            self.clone_mode = True
+            self.pipette_mode = False
+            self.flood_mode = False
+            self.selection_mode = False
             self.tool = None
             self.editor.update_status()
             return
         self.pipette_mode = False
         self.flood_mode = False
         self.selection_mode = False
+        self.clone_mode = False
         self.tool = code
         self.editor.update_status()
 
@@ -63,9 +81,18 @@ class ToolManager:
             return "Пипетка"
         if self.flood_mode:
             return "Заливка"
+        if self.clone_mode:
+            return "Штамп"
         if self.tool == EMPTY:
             return "Ластик"
         return self.tool if self.tool else "Текстура"
+
+    def set_clone_source(self, x: int, y: int, layer_idx: int):
+        self.clone_source_x = x
+        self.clone_source_y = y
+        self.clone_source_layer = layer_idx
+        self.clone_source_valid = True
+        self.editor.console._print(f"Источник штампа установлен: ({x},{y}) слой {layer_idx+1}", "success")
 
 class Editor:
     def __init__(self, root: tk.Tk) -> None:
@@ -83,12 +110,13 @@ class Editor:
         self.settings = Settings()
         self.tool_manager = ToolManager(self)
         self.hotbar_mgr = HotbarManager()
+        self.brush_manager = BrushManager()
         self.tool_manager.brush_size = self.settings.get("brush_size", 1)
         self.show_grid = self.settings.get("show_grid", True)
         theme_name = self.settings.get_theme()
         CFG.set_theme(theme_name)
         self.layer_manager = LayerManager(self)
-        self.drawing = DrawingEngine(self)
+        self.drawing = DrawingEngine(self, self.brush_manager)
         self.selection = Selection()
         self.clipboard = None
         self.main_container = tk.Frame(self.root, bg=CFG.colors["BG_PANEL"])
@@ -133,6 +161,49 @@ class Editor:
         self.left_panel.configure(bg=CFG.colors["BG_PANEL"])
         self.right_panel.configure(bg=CFG.colors["BG_PANEL"])
         self.drawing.redraw_visible_tiles()
+        for widget in self.root.winfo_children():
+            if isinstance(widget, tk.Toplevel):
+                self._update_window_theme(widget)
+
+    def _update_window_theme(self, window: tk.Toplevel):
+        try:
+            window.configure(bg=CFG.colors["BG_PANEL"])
+            for child in window.winfo_children():
+                if isinstance(child, (tk.Frame, tk.LabelFrame)):
+                    child.configure(bg=CFG.colors["BG_PANEL"])
+                    for subchild in child.winfo_children():
+                        if isinstance(subchild, tk.Button):
+                            subchild.configure(bg=CFG.colors["BUTTON"], fg=CFG.colors["TEXT"],
+                                              activebackground=CFG.colors["BUTTON_ACTIVE"])
+                        elif isinstance(subchild, tk.Label):
+                            subchild.configure(bg=CFG.colors["BG_PANEL"], fg=CFG.colors["TEXT"])
+                        elif isinstance(subchild, tk.Entry):
+                            subchild.configure(bg=CFG.colors["BUTTON"], fg=CFG.colors["TEXT"])
+                        elif isinstance(subchild, tk.Text):
+                            subchild.configure(bg=CFG.colors["BG_CANVAS"], fg=CFG.colors["TEXT"])
+                        elif isinstance(subchild, tk.Checkbutton):
+                            subchild.configure(bg=CFG.colors["BG_PANEL"], fg=CFG.colors["TEXT"],
+                                              selectcolor=CFG.colors["BG_PANEL"])
+                        elif isinstance(subchild, tk.Radiobutton):
+                            subchild.configure(bg=CFG.colors["BG_PANEL"], fg=CFG.colors["TEXT"],
+                                              selectcolor=CFG.colors["BG_PANEL"])
+                elif isinstance(child, tk.Button):
+                    child.configure(bg=CFG.colors["BUTTON"], fg=CFG.colors["TEXT"],
+                                   activebackground=CFG.colors["BUTTON_ACTIVE"])
+                elif isinstance(child, tk.Label):
+                    child.configure(bg=CFG.colors["BG_PANEL"], fg=CFG.colors["TEXT"])
+                elif isinstance(child, tk.Entry):
+                    child.configure(bg=CFG.colors["BUTTON"], fg=CFG.colors["TEXT"])
+                elif isinstance(child, tk.Text):
+                    child.configure(bg=CFG.colors["BG_CANVAS"], fg=CFG.colors["TEXT"])
+                elif isinstance(child, tk.Checkbutton):
+                    child.configure(bg=CFG.colors["BG_PANEL"], fg=CFG.colors["TEXT"],
+                                   selectcolor=CFG.colors["BG_PANEL"])
+                elif isinstance(child, tk.Radiobutton):
+                    child.configure(bg=CFG.colors["BG_PANEL"], fg=CFG.colors["TEXT"],
+                                   selectcolor=CFG.colors["BG_PANEL"])
+        except:
+            pass
 
     def toggle_theme(self) -> None:
         new_theme = "light" if CFG._current_theme == "dark" else "dark"
@@ -166,6 +237,7 @@ class Editor:
     def undo_op(self) -> None:
         if s := self.undo.undo_op(self.map.get()):
             self.map.set(s)
+            self.camera.set_map_size(self.map.w, self.map.h)
             self.ui.update_layer_ui()
             if self.layer_manager.current_layer >= self.map.get_num_layers():
                 self.layer_manager.current_layer = self.map.get_num_layers() - 1
@@ -176,6 +248,7 @@ class Editor:
     def redo_op(self) -> None:
         if s := self.undo.redo_op(self.map.get()):
             self.map.set(s)
+            self.camera.set_map_size(self.map.w, self.map.h)
             self.ui.update_layer_ui()
             if self.layer_manager.current_layer >= self.map.get_num_layers():
                 self.layer_manager.current_layer = self.map.get_num_layers() - 1
@@ -279,6 +352,7 @@ class Editor:
                 if self.file.load_json(f):
                     self.settings.set("last_json_path", os.path.dirname(f))
                     self.settings.add_recent_file(f)
+                    self.camera.set_map_size(self.map.w, self.map.h)
                     self.ui.update_layer_ui()
                     self.layer_manager.current_layer = 0
                     self.layer_manager.set_active_layer(0)
@@ -329,6 +403,12 @@ class Editor:
                 new_h = int(height_entry.get())
                 if new_w < 1 or new_h < 1:
                     raise ValueError
+                if new_w > 500:
+                    self.console._print("Ширина не может превышать 500 клеток", "error")
+                    return
+                if new_h > 250:
+                    self.console._print("Высота не может превышать 250 клеток", "error")
+                    return
                 shift_x = int(shift_x_entry.get())
                 shift_y = int(shift_y_entry.get())
                 if crop_var.get():
@@ -394,6 +474,7 @@ class Editor:
         self.tex.update_block_size(self.camera.zoom)
         self.ui.refresh_hotbar()
         self.drawing.redraw_visible_tiles()
+        HotbarConfigWindow.refresh_all_instances(self.tex)
         self.console._print(f"Загружено {len(files)} текстур", "success")
 
     def del_tex(self) -> None:
@@ -456,6 +537,7 @@ class Editor:
             self.tex.update_block_size(self.camera.zoom)
             self.ui.refresh_hotbar()
             self.drawing.redraw_visible_tiles()
+            HotbarConfigWindow.refresh_all_instances(self.tex)
             self.console._print("Все текстуры удалены", "success")
             return
         try:
@@ -470,6 +552,7 @@ class Editor:
                 self.tex.update_block_size(self.camera.zoom)
                 self.ui.refresh_hotbar()
                 self.drawing.redraw_visible_tiles()
+                HotbarConfigWindow.refresh_all_instances(self.tex)
                 self.console._print(f"Удалено текстур: {len(deleted)}", "success")
             else:
                 self.console._print("Ничего не удалено", "warning")
@@ -641,3 +724,19 @@ class Editor:
 
     def enable_selection_tool(self) -> None:
         self.tool_manager.set_tool(-3, False)
+
+    def open_brush_config(self) -> None:
+        from .brush import BrushConfigWindow
+        BrushConfigWindow(self.root, self.brush_manager, lambda: self.drawing.redraw_visible_tiles())
+
+    def enable_clone_tool(self) -> None:
+        self.tool_manager.set_tool(-4, False)
+
+    def set_clone_source(self, x: int, y: int):
+        visible_layers = [i for i, vis in enumerate(self.map.visible) if vis]
+        for layer_idx in reversed(visible_layers):
+            tex = self.map.layers[layer_idx].grid[y][x]
+            if tex != EMPTY:
+                self.tool_manager.set_clone_source(x, y, layer_idx)
+                return
+        self.console._print("Не удалось установить источник штампа: нет текстуры в видимых слоях", "warning")

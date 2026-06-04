@@ -41,7 +41,7 @@ class Config:
             "BG_PANEL": "#E0E0E0",
             "TEXT": "#000000",
             "GRID": "#CCCCCC",
-            "BUTTON": "#FFFFFF",
+            "BUTTON": "#F3F3F3",
             "BUTTON_ACTIVE": "#E0E0E0",
             "SLOT_BORDER": "#AFAFAF",
         }
@@ -58,7 +58,7 @@ CFG = Config()
 EMPTY = ""
 
 class ProgressDialog:
-    def __init__(self, parent, title: str = "Прогресс", max_value: int = 100):
+    def __init__(self, parent, title: str = "Прогресс", max_value: int = 100, callback=None):
         self.dialog = tk.Toplevel(parent)
         self.dialog.title(title)
         self.dialog.geometry("400x120")
@@ -70,6 +70,7 @@ class ProgressDialog:
         
         self.dialog.protocol("WM_DELETE_WINDOW", self._on_close)
         self._cancelled = False
+        self._callback = callback
         
         main_frame = tk.Frame(self.dialog, bg=colors["BG_PANEL"])
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
@@ -94,6 +95,8 @@ class ProgressDialog:
     
     def _on_close(self):
         self._cancelled = True
+        if self._callback:
+            self._callback(False)
         self.dialog.destroy()
     
     def _cancel(self):

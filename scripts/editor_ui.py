@@ -1,4 +1,3 @@
-# editor_ui.py
 import tkinter as tk
 from typing import Optional
 from .config import CFG, EMPTY
@@ -28,7 +27,6 @@ class UIManager:
     def setup(self, parent: tk.Frame) -> None:
         self._setup_canvas(parent)
         self._setup_toolbar_panel(parent)
-        self._setup_layer_panel(parent)
         self._setup_bottom_panel(parent)
         self._setup_status_bar(parent)
         self._bind_hotbar_keys()
@@ -36,6 +34,8 @@ class UIManager:
 
     def _bind_hotbar_keys(self) -> None:
         def on_key(event):
+            if self.editor.console.console_has_focus():
+                return
             if event.char.isdigit() and event.char != '0':
                 idx = int(event.char) - 1
                 if self.hotbar_widget and 0 <= idx < 9:
@@ -85,6 +85,11 @@ class UIManager:
                              bg=colors["BUTTON"], fg=colors["TEXT"],
                              activebackground=colors["BUTTON_ACTIVE"])
         btn_fill.pack(side=tk.LEFT, padx=2)
+        btn_clone = tk.Button(self.left_block, image=self.editor.tex.get_icon("stamp.png"),
+                              command=self.editor.enable_clone_tool,
+                              bg=colors["BUTTON"], fg=colors["TEXT"],
+                              activebackground=colors["BUTTON_ACTIVE"])
+        btn_clone.pack(side=tk.LEFT, padx=2)
 
         btn_circle = tk.Button(self.left_block, image=self.editor.tex.get_icon("circle.png"),
                                command=lambda: self._activate_primitive("circle"),
@@ -113,12 +118,69 @@ class UIManager:
                              activebackground=colors["BUTTON_ACTIVE"])
         self.hotbar_settings_btn.pack(side=tk.LEFT, padx=2)
 
+        tk.Label(self.toolbar_frame, text="Кисть:", bg=colors["BG_PANEL"], fg=colors["TEXT"]).pack(side=tk.LEFT, padx=5)
+        self.brush_size_label = tk.Label(self.toolbar_frame, text=f"{self.editor.tool_manager.brush_size}",
+                                         width=3, bg=colors["BUTTON"], fg=colors["TEXT"], relief=tk.SUNKEN)
+        self.brush_size_label.pack(side=tk.LEFT, padx=2)
+        btn_minus = tk.Button(self.toolbar_frame, text="-", width=2, command=self.editor.dec_brush,
+                              bg=colors["BUTTON"], fg=colors["TEXT"],
+                              activebackground=colors["BUTTON_ACTIVE"])
+        btn_minus.pack(side=tk.LEFT, padx=1)
+        btn_plus = tk.Button(self.toolbar_frame, text="+", width=2, command=self.editor.inc_brush,
+                             bg=colors["BUTTON"], fg=colors["TEXT"],
+                             activebackground=colors["BUTTON_ACTIVE"])
+        btn_plus.pack(side=tk.LEFT, padx=1)
+        btn_brush_config = tk.Button(self.toolbar_frame, text="Настройка кисти", command=self.editor.open_brush_config,
+                                     bg=colors["BUTTON"], fg=colors["TEXT"],
+                                     activebackground=colors["BUTTON_ACTIVE"])
+        btn_brush_config.pack(side=tk.LEFT, padx=5)
+
+        self._setup_layer_controls(self.toolbar_frame)
+
+    def _setup_layer_controls(self, parent):
+        colors = CFG.colors
+        self.layer_frame = tk.Frame(parent, bg=colors["BG_PANEL"])
+        self.layer_frame.pack(side=tk.LEFT, padx=10)
+        tk.Label(self.layer_frame, text="Слой:", bg=colors["BG_PANEL"], fg=colors["TEXT"]).pack(side=tk.LEFT, padx=2)
+        self.layer_spinbox = tk.Spinbox(
+            self.layer_frame, from_=1, to=CFG.max_layers, width=4,
+            command=self._spinbox_changed,
+            bg=colors["BUTTON"], fg=colors["TEXT"],
+            buttonbackground=colors["BUTTON"],
+            selectbackground=colors["GREY"],
+            selectforeground=colors["TEXT"]
+        )
+        self.layer_spinbox.pack(side=tk.LEFT, padx=2)
+        self.layer_spinbox.bind("<Return>", lambda e: self._spinbox_changed())
+        btn_add = tk.Button(self.layer_frame, text="+", width=2, command=self._add_layer_callback,
+                           bg=colors["BUTTON"], fg=colors["TEXT"],
+                           activebackground=colors["BUTTON_ACTIVE"])
+        btn_add.pack(side=tk.LEFT, padx=2)
+        btn_remove = tk.Button(self.layer_frame, text="-", width=2, command=self._remove_layer_callback,
+                              bg=colors["BUTTON"], fg=colors["TEXT"],
+                              activebackground=colors["BUTTON_ACTIVE"])
+        btn_remove.pack(side=tk.LEFT, padx=2)
+        self.visible_var = tk.BooleanVar(value=True)
+        self.visible_check = tk.Checkbutton(
+            self.layer_frame, text="Вид", variable=self.visible_var,
+            command=self.editor.layer_manager.toggle_visibility,
+            bg=colors["BG_PANEL"], fg=colors["TEXT"], selectcolor=colors["BG_PANEL"]
+        )
+        self.visible_check.pack(side=tk.LEFT, padx=5)
+        btn_manager = tk.Button(self.layer_frame, text="Список", command=self._open_layer_manager,
+                               bg=colors["BUTTON"], fg=colors["TEXT"],
+                               activebackground=colors["BUTTON_ACTIVE"])
+        btn_manager.pack(side=tk.LEFT, padx=2)
+
+        self.editor.theme.register_widget("layer_frame", self.layer_frame)
+        self.editor.theme.register_widget("layer_spinbox", self.layer_spinbox)
+        self.editor.theme.register_widget("visible_check", self.visible_check)
+        self.update_layer_ui()
+
     def _activate_primitive(self, prim_type: Optional[str]):
         self.editor.drawing.cancel_primitive()
         if prim_type:
             self.editor.drawing.start_primitive(prim_type)
-        else:
-            pass
 
     def refresh_hotbar(self) -> None:
         if self.hotbar_widget:
@@ -126,7 +188,7 @@ class UIManager:
 
     def _open_hotbar_settings(self) -> None:
         if self.hotbar_widget:
-            HotbarConfigWindow(self.editor.root, self.editor.tex, self.editor.hotbar_mgr, self.hotbar_widget)
+            HotbarConfigWindow(self.editor.root, self.editor.tex, self.editor.hotbar_mgr, self.hotbar_widget, self.editor.block_dir, self.editor)
 
     def _setup_status_bar(self, parent: tk.Frame) -> None:
         colors = CFG.colors
@@ -159,46 +221,6 @@ class UIManager:
                 self.editor.camera.clamp()
                 self.editor.drawing.redraw_visible_tiles()
 
-    def _setup_layer_panel(self, parent: tk.Frame) -> None:
-        colors = CFG.colors
-        self.layer_frame = tk.Frame(parent, bg=colors["BG_PANEL"], pady=5)
-        self.layer_frame.pack(fill=tk.X)
-        tk.Label(self.layer_frame, text="Слои:", bg=colors["BG_PANEL"], 
-                fg=colors["TEXT"]).pack(side=tk.LEFT, padx=5)
-        self.layer_spinbox = tk.Spinbox(
-            self.layer_frame, from_=1, to=CFG.max_layers, width=5,
-            command=self._spinbox_changed,
-            bg=colors["BUTTON"], fg=colors["TEXT"],
-            buttonbackground=colors["BUTTON"],
-            selectbackground=colors["GREY"],
-            selectforeground=colors["TEXT"]
-        )
-        self.layer_spinbox.pack(side=tk.LEFT, padx=2)
-        self.layer_spinbox.bind("<Return>", lambda e: self._spinbox_changed())
-        btn_add = tk.Button(self.layer_frame, text="+", width=2, command=self._add_layer_callback,
-                           bg=colors["BUTTON"], fg=colors["TEXT"],
-                           activebackground=colors["BUTTON_ACTIVE"])
-        btn_add.pack(side=tk.LEFT, padx=5)
-        btn_remove = tk.Button(self.layer_frame, text="-", width=2, command=self._remove_layer_callback,
-                              bg=colors["BUTTON"], fg=colors["TEXT"],
-                              activebackground=colors["BUTTON_ACTIVE"])
-        btn_remove.pack(side=tk.LEFT, padx=2)
-        self.visible_var = tk.BooleanVar(value=True)
-        self.visible_check = tk.Checkbutton(
-            self.layer_frame, text="Вид", variable=self.visible_var,
-            command=self.editor.layer_manager.toggle_visibility,
-            bg=colors["BG_PANEL"], fg=colors["TEXT"], selectcolor=colors["BG_PANEL"]
-        )
-        self.visible_check.pack(side=tk.LEFT, padx=10)
-        btn_manager = tk.Button(self.layer_frame, text="Список слоёв", command=self._open_layer_manager,
-                               bg=colors["BUTTON"], fg=colors["TEXT"],
-                               activebackground=colors["BUTTON_ACTIVE"])
-        btn_manager.pack(side=tk.LEFT, padx=5)
-        self.editor.theme.register_widget("layer_frame", self.layer_frame)
-        self.editor.theme.register_widget("layer_spinbox", self.layer_spinbox)
-        self.editor.theme.register_widget("visible_check", self.visible_check)
-        self.update_layer_ui()
-
     def _add_layer_callback(self) -> None:
         if self.editor.map.get_num_layers() >= CFG.max_layers:
             self.editor.console._print(f"Ошибка: максимальное количество слоёв {CFG.max_layers}", "error")
@@ -227,21 +249,6 @@ class UIManager:
         self.bottom_frame = tk.Frame(parent, bg=colors["BG_PANEL"], pady=5)
         self.bottom_frame.pack(fill=tk.X)
         self._build_action_buttons()
-        self._add_separator(self.bottom_frame)
-        tk.Label(self.bottom_frame, text="Кисть:", bg=colors["BG_PANEL"], 
-                fg=colors["TEXT"]).pack(side=tk.LEFT, padx=5)
-        self.brush_size_label = tk.Label(self.bottom_frame, text=f"{self.editor.tool_manager.brush_size}", 
-                                        width=3, bg=colors["BUTTON"], fg=colors["TEXT"],
-                                        relief=tk.SUNKEN)
-        self.brush_size_label.pack(side=tk.LEFT, padx=2)
-        btn_minus = tk.Button(self.bottom_frame, text="-", width=2, command=self.editor.dec_brush,
-                             bg=colors["BUTTON"], fg=colors["TEXT"],
-                             activebackground=colors["BUTTON_ACTIVE"])
-        btn_minus.pack(side=tk.LEFT, padx=1)
-        btn_plus = tk.Button(self.bottom_frame, text="+", width=2, command=self.editor.inc_brush,
-                            bg=colors["BUTTON"], fg=colors["TEXT"],
-                            activebackground=colors["BUTTON_ACTIVE"])
-        btn_plus.pack(side=tk.LEFT, padx=1)
         self.grid_var = tk.BooleanVar(value=self.editor.show_grid)
         self.grid_check = tk.Checkbutton(self.bottom_frame, text="Сетка", variable=self.grid_var, 
                                          command=self.editor.toggle_grid, bg=colors["BG_PANEL"],
@@ -260,7 +267,6 @@ class UIManager:
                                     activebackground=colors["BUTTON_ACTIVE"])
         self.center_btn.pack(side=tk.LEFT, padx=5)
         self.editor.theme.register_widget("bottom_frame", self.bottom_frame)
-        self.editor.theme.register_widget("brush_size_label", self.brush_size_label)
         self.editor.theme.register_widget("grid_check", self.grid_check)
 
     def _build_action_buttons(self) -> None:
@@ -280,13 +286,11 @@ class UIManager:
                                   command=self.editor.load_json, bg=colors["BUTTON"], fg=colors["TEXT"],
                                   activebackground=colors["BUTTON_ACTIVE"])
         btn_load_json.pack(side=tk.LEFT, padx=2)
-        self._add_separator(self.bottom_frame)
         img_clear = self.editor.tex.get_icon("clear.png")
         btn_clear = tk.Button(self.bottom_frame, image=img_clear, text="", command=self._clear_callback,
                               bg=colors["BUTTON"], fg=colors["TEXT"],
                               activebackground=colors["BUTTON_ACTIVE"])
         btn_clear.pack(side=tk.LEFT, padx=2)
-        self._add_separator(self.bottom_frame)
         img_undo = self.editor.tex.get_icon("undo.png")
         btn_undo = tk.Button(self.bottom_frame, image=img_undo, text="", command=self.editor.undo_op,
                              bg=colors["BUTTON"], fg=colors["TEXT"],
@@ -297,7 +301,6 @@ class UIManager:
                              bg=colors["BUTTON"], fg=colors["TEXT"],
                              activebackground=colors["BUTTON_ACTIVE"])
         btn_redo.pack(side=tk.LEFT, padx=2)
-        self._add_separator(self.bottom_frame)
         btn_select = tk.Button(self.bottom_frame, text="Выделить", command=self.editor.enable_selection_tool,
                              bg=colors["BUTTON"], fg=colors["TEXT"],
                              activebackground=colors["BUTTON_ACTIVE"])
@@ -314,7 +317,6 @@ class UIManager:
                              bg=colors["BUTTON"], fg=colors["TEXT"],
                              activebackground=colors["BUTTON_ACTIVE"])
         btn_paste.pack(side=tk.LEFT, padx=2)
-        self._add_separator(self.bottom_frame)
         btn_import = tk.Button(self.bottom_frame, text="Загрузить текстуры", command=self.editor.import_tex,
                              bg=colors["BUTTON"], fg=colors["TEXT"],
                              activebackground=colors["BUTTON_ACTIVE"])
@@ -323,7 +325,6 @@ class UIManager:
                              bg=colors["BUTTON"], fg=colors["TEXT"],
                              activebackground=colors["BUTTON_ACTIVE"])
         btn_delete.pack(side=tk.LEFT, padx=2)
-        self._add_separator(self.bottom_frame)
         btn_load_preset = tk.Button(self.bottom_frame, text="Загрузить пресет", command=self.editor.load_preset,
                                    bg=colors["BUTTON"], fg=colors["TEXT"],
                                    activebackground=colors["BUTTON_ACTIVE"])
@@ -332,9 +333,6 @@ class UIManager:
                                    bg=colors["BUTTON"], fg=colors["TEXT"],
                                    activebackground=colors["BUTTON_ACTIVE"])
         btn_save_preset.pack(side=tk.LEFT, padx=2)
-
-    def _add_separator(self, parent) -> None:
-        tk.Frame(parent, width=2, bg=CFG.colors["GREY"], relief=tk.RAISED).pack(side=tk.LEFT, padx=5, fill=tk.Y)
 
     def _clear_callback(self) -> None:
         self.editor.clear_all_layers()
@@ -364,11 +362,12 @@ class UIManager:
     def update_theme(self) -> None:
         colors = CFG.colors
         self.toolbar_frame.config(bg=colors["BG_PANEL"])
-        self.layer_frame.config(bg=colors["BG_PANEL"])
+        if self.layer_frame:
+            self.layer_frame.config(bg=colors["BG_PANEL"])
         self.bottom_frame.config(bg=colors["BG_PANEL"])
         self.canvas.config(bg=colors["BG_CANVAS"])
         self.status.config(bg=colors["L_GREY"], fg=colors["TEXT"])
-        for frame in [self.toolbar_frame, self.layer_frame, self.bottom_frame]:
+        for frame in [self.toolbar_frame, self.bottom_frame]:
             for child in frame.winfo_children():
                 if isinstance(child, tk.Button):
                     child.config(bg=colors["BUTTON"], fg=colors["TEXT"],

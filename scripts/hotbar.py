@@ -2,7 +2,7 @@
 import tkinter as tk
 import json
 import os
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Set
 from dataclasses import dataclass
 from PIL import Image, ImageTk
 from .config import CFG
@@ -225,11 +225,23 @@ class HotbarWidget:
         self.refresh()
 
 class HotbarConfigWindow:
+    _instances: Set["HotbarConfigWindow"] = set()
+
+    @classmethod
+    def refresh_all_instances(cls, tex_mgr: TexMgr) -> None:
+        for instance in list(cls._instances):
+            if instance.window.winfo_exists():
+                instance._refresh_texture_list(tex_mgr)
+            else:
+                cls._instances.discard(instance)
+
     def __init__(self, parent, tex_mgr: TexMgr, hotbar_mgr: HotbarManager,
-                 hotbar_widget: HotbarWidget):
+                 hotbar_widget: HotbarWidget, block_dir: str, editor=None):
         self.tex_mgr = tex_mgr
         self.hotbar_mgr = hotbar_mgr
         self.hotbar_widget = hotbar_widget
+        self.block_dir = block_dir
+        self.editor = editor
         self.window = tk.Toplevel(parent)
         self.window.title("Управление хотбаром")
         self.window.geometry("900x550")
@@ -237,8 +249,14 @@ class HotbarConfigWindow:
         self.window.transient(parent)
         self.window.grab_set()
         self.window.configure(bg=CFG.colors["BG_PANEL"])
+        self._instances.add(self)
+        self.window.protocol("WM_DELETE_WINDOW", self._on_close)
         self._build()
         self._apply_theme()
+
+    def _on_close(self):
+        self._instances.discard(self)
+        self.window.destroy()
 
     def _apply_theme(self):
         colors = CFG.colors
@@ -316,8 +334,13 @@ class HotbarConfigWindow:
         search_entry = tk.Entry(search_frame, textvariable=self.search_var, width=30,
                                bg=colors["BUTTON"], fg=colors["TEXT"])
         search_entry.pack(side=tk.LEFT, padx=5)
-        tk.Button(search_frame, text="Сброс", command=lambda: self.search_var.set(""),
-                 bg=colors["BUTTON"], fg=colors["TEXT"]).pack(side=tk.LEFT, padx=5)
+        btn_reset = tk.Button(search_frame, text="Сброс", command=lambda: self.search_var.set(""),
+                             bg=colors["BUTTON"], fg=colors["TEXT"])
+        btn_reset.pack(side=tk.LEFT, padx=5)
+        refresh_icon = self.tex_mgr.get_icon("refresh.png")
+        btn_refresh = tk.Button(search_frame, image=refresh_icon, command=self._refresh_textures,
+                               bg=colors["BUTTON"], fg=colors["TEXT"])
+        btn_refresh.pack(side=tk.LEFT, padx=5)
         canvas_frame = tk.Frame(texture_frame, bg=colors["BG_PANEL"])
         canvas_frame.pack(fill=tk.BOTH, expand=True)
         self.textures_canvas = tk.Canvas(canvas_frame, bg=colors["BG_CANVAS"], highlightthickness=0)
@@ -329,9 +352,23 @@ class HotbarConfigWindow:
         self._bind_scroll_to_widget(self.textures_canvas)
         self._bind_all_children(self.textures_container)
         self.search_var.trace('w', lambda *_: self._filter_textures())
-        btn_close = tk.Button(main_frame, text="Закрыть", command=self.window.destroy,
+        btn_close = tk.Button(main_frame, text="Закрыть", command=self._on_close,
                              bg=colors["BUTTON"], fg=colors["TEXT"], width=10)
         btn_close.pack(pady=5)
+
+    def _refresh_textures(self):
+        self.tex_mgr.load_blocks(self.block_dir, log_func=None)
+        self.tex_mgr.update_block_size(self.tex_mgr._current_zoom)
+        self._populate_textures()
+        self.hotbar_widget.refresh()
+        if self.editor:
+            self.editor.drawing.redraw_visible_tiles()
+
+    def _refresh_texture_list(self, tex_mgr: TexMgr):
+        self.tex_mgr = tex_mgr
+        self._populate_textures()
+        if self.editor:
+            self.editor.drawing.redraw_visible_tiles()
 
     def _update_slots_display(self):
         colors = CFG.colors

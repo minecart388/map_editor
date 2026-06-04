@@ -1,7 +1,7 @@
 # console.py
 import tkinter as tk
 from typing import Optional, List, Tuple
-from .config import CFG, EMPTY
+from .config import CFG
 from .console_cmd import ConsoleCommands
 
 class ConsoleManager:
@@ -154,7 +154,6 @@ class ConsoleManager:
             self.completion_popup.destroy()
         self.completion_popup = None
         self.completion_listbox = None
-        self.scrollbar = None
 
     def _show_completion_popup(self, matches: List[str], prefix: str):
         self._hide_completion_popup()
@@ -191,9 +190,9 @@ class ConsoleManager:
                 self.completion_listbox.insert(tk.END, display_text)
             if matches:
                 self.completion_listbox.select_set(0)
-            self.scrollbar = tk.Scrollbar(listbox_frame, orient=tk.VERTICAL, command=self.completion_listbox.yview)
-            self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-            self.completion_listbox.config(yscrollcommand=self.scrollbar.set)
+            listbox_scrollbar = tk.Scrollbar(listbox_frame, orient=tk.VERTICAL, command=self.completion_listbox.yview)
+            listbox_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            self.completion_listbox.config(yscrollcommand=listbox_scrollbar.set)
             max_visible = 12
             visible_count = min(len(matches), max_visible)
             item_height = 18
@@ -443,6 +442,7 @@ class ConsoleManager:
     def _load_preset_file(self, preset_name: str) -> None:
         self.editor.save_state()
         if self.editor.file.load_preset(preset_name):
+            self.editor.camera.set_map_size(self.editor.map.w, self.editor.map.h)
             self.editor.ui.update_layer_ui()
             self.editor.layer_manager.current_layer = 0
             self.editor.layer_manager.set_active_layer(0)

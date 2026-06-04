@@ -51,14 +51,14 @@ class TexMgr:
                 skipped.append(name)
         if log_func and skipped:
             log_func(f"Пропущены некорректные файлы: {', '.join(skipped)}", "warning")
+        self._current_block_size = 0
         self.update_block_size(self._current_zoom)
 
     def load_icons(self, folder: str) -> None:
         self.icons.clear()
         if not os.path.isdir(folder):
             return
-        icon_names = ["void.png", "find.png", "fill.png", "undo.png", "redo.png",
-                    "download.png", "upload.png", "clear.png", "circle.png", "rect.png", "line.png"]
+        icon_names = ["void.png", "find.png", "fill.png", "undo.png", "redo.png", "download.png", "upload.png", "clear.png", "circle.png", "rect.png", "line.png", "refresh.png", "stamp.png"]
         for name in icon_names:
             p = os.path.join(folder, name)
             if os.path.exists(p):
@@ -70,11 +70,16 @@ class TexMgr:
 
     def update_block_size(self, zoom: float) -> None:
         new_size = max(1, int(CFG.cell_size * zoom))
-        if new_size == self._current_block_size:
+        if new_size == self._current_block_size and self.blocks:
             return
         self._current_block_size = new_size
         self._current_zoom = zoom
+        for name in list(self.blocks.keys()):
+            del self.blocks[name]
+        for name in list(self.thumbs.keys()):
+            del self.thumbs[name]
         self.blocks.clear()
+        self.thumbs.clear()
         for name, img in self.originals.items():
             resized = img.resize((new_size, new_size), Image.Resampling.NEAREST)
             self.blocks[name] = ImageTk.PhotoImage(resized)

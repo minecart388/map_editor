@@ -204,8 +204,9 @@ class Selection:
         return self.x1, self.y1, self.x2, self.y2
 
 class DrawingEngine:
-    def __init__(self, editor):
+    def __init__(self, editor, brush_manager):
         self.editor = editor
+        self.brush_manager = brush_manager
         self._drag: bool = False
         self._last: Optional[Tuple[int, int]] = None
         self._cached_items: Dict[Tuple[int, int, int], int] = {}
@@ -217,6 +218,7 @@ class DrawingEngine:
         self._primitive_start: Optional[Tuple[int, int]] = None
         self._primitive_current: Optional[Tuple[int, int]] = None
         self._primitive_type: Optional[str] = None
+        self._clone_first_click: Optional[Tuple[int, int]] = None
 
     def start_primitive(self, prim_type: str):
         self.cancel_primitive()
@@ -520,6 +522,8 @@ class DrawingEngine:
             delattr(self, '_move_selection_offset')
         self._drag = False
         self._last = None
+        if self.editor.tool_manager.clone_mode and self._clone_first_click:
+            self._clone_first_click = None
 
     def _start_selection(self, e: tk.Event):
         wx, wy = self.editor.camera.screen_to_world(e.x, e.y)
@@ -585,21 +589,49 @@ class DrawingEngine:
         return cells
 
     def _brush(self, x: int, y: int) -> bool:
-        layer = self.editor.layer_manager.get_active_layer_obj()
-        changed = False
-        left = x - (self.editor.tool_manager.brush_size - 1) // 2
-        right = x + self.editor.tool_manager.brush_size // 2
-        top = y - (self.editor.tool_manager.brush_size - 1) // 2
-        bottom = y + self.editor.tool_manager.brush_size // 2
-        for ny in range(top, bottom + 1):
-            for nx in range(left, right + 1):
-                if 0 <= ny < self.editor.map.h and 0 <= nx < self.editor.map.w:
+        if self.editor.tool_manager.clone_mode:
+            if not self.editor.tool_manager.clone_source_valid:
+                self.editor.console._print("Штамп: сначала установите источник (Alt+клик)", "warning")
+                return False
+            layer = self.editor.layer_manager.get_active_layer_obj()
+            changed = False
+            offsets = self.brush_manager.get_offsets(self.editor.tool_manager.brush_size)
+            if self._clone_first_click is None:
+                self._clone_first_click = (x, y)
+                return False
+            start_x, start_y = self._clone_first_click
+            src_x0 = self.editor.tool_manager.clone_source_x
+            src_y0 = self.editor.tool_manager.clone_source_y
+            for dx, dy in offsets:
+                nx = x + dx
+                ny = y + dy
+                if 0 <= nx < self.editor.map.w and 0 <= ny < self.editor.map.h:
+                    src_x = src_x0 + (nx - start_x)
+                    src_y = src_y0 + (ny - start_y)
+                    if 0 <= src_x < self.editor.map.w and 0 <= src_y < self.editor.map.h:
+                        src_layer_idx = self.editor.tool_manager.clone_source_layer
+                        if src_layer_idx < len(self.editor.map.layers):
+                            tex_name = self.editor.map.layers[src_layer_idx].grid[src_y][src_x]
+                            if tex_name != EMPTY:
+                                if layer.grid[ny][nx] != tex_name:
+                                    layer.grid[ny][nx] = tex_name
+                                    self.update_cell(nx, ny, self.editor.layer_manager.current_layer, tex_name)
+                                    changed = True
+            return changed
+        else:
+            layer = self.editor.layer_manager.get_active_layer_obj()
+            changed = False
+            offsets = self.brush_manager.get_offsets(self.editor.tool_manager.brush_size)
+            for dx, dy in offsets:
+                nx = x + dx
+                ny = y + dy
+                if 0 <= nx < self.editor.map.w and 0 <= ny < self.editor.map.h:
                     new_value = self.editor.tool_manager.tool if self.editor.tool_manager.tool is not None else EMPTY
                     if layer.grid[ny][nx] != new_value:
                         layer.grid[ny][nx] = new_value
                         self.update_cell(nx, ny, self.editor.layer_manager.current_layer, new_value)
                         changed = True
-        return changed
+            return changed
 
     def _apply(self, px: int, py: int) -> None:
         wx, wy = self.editor.camera.screen_to_world(px, py)
@@ -672,6 +704,9 @@ class DrawingEngine:
         xc = int(wx)
         yc = int(wy)
         if not (0 <= xc < self.editor.map.w and 0 <= yc < self.editor.map.h):
+            return
+        if self.editor.tool_manager.clone_mode:
+            self.editor.set_clone_source(xc, yc)
             return
         for idx in range(len(self.editor.map.layers) - 1, -1, -1):
             if not self.editor.map.visible[idx]:
