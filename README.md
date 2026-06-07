@@ -19,10 +19,7 @@ Multi-layer map editor with support for custom textures, a preset system, a comm
 - **Selection Tools** – select, copy, cut, paste, and move rectangular areas
 - **Clone Stamp** – copy textures from one place and paint them elsewhere
 - **Shape Primitives** – draw circles, rectangles, and lines with one click
-- **Light / Dark Theme** – switch between two color schemes
 - **Viewport Controls** – zoom, pan, and center the map
-
-## Usage
 
 ### Launching
 
@@ -111,17 +108,6 @@ Type commands into the console at the bottom‑right. Press `Ctrl+Enter` to exec
 3. Use the `Copy`, `Cut`, or `Paste` buttons.
 4. Press `Escape` to clear the selection.
 
-### Clone stamp
-
-1. Click the `Stamp` or use the console command `tool`.
-2. Hold `Alt` and click on a texture to set the source point.
-3. Draw on the map – the texture from the source point will be copied relative to the first click position.
-
-### Drawing primitives
-
-Use the toolbar buttons (circle, rectangle, line) to draw unfilled outlines.  
-Click the button, then click and drag on the canvas to define the shape. The shape will be drawn using the currently selected texture.
-
 ### Custom brushes
 
 1. Click `Brush settings`.
@@ -171,6 +157,26 @@ Click `Theme` to toggle between light and dark mode. The theme choice is saved.
 - **Python:** 3.8+ (to run from source)
 - **RAM:** 256 MB (512 MB recommended for large maps)
 - **Dependencies:** Pillow (for image processing)
+
+## Note for version 2.0.4
+
+By default, the maximum map size is limited to **500 cells in width** and **250 cells in height**. If you need a larger map, download the source code, locate `scripts/editor.py`, and modify lines 406–411:
+
+```python
+if new_w > 500:
+    self.console._print("Width cannot exceed 500 cells", "error")
+    return
+if new_h > 250:
+    self.console._print("Height cannot exceed 250 cells", "error")
+    return
+```
+
+After changing the limits, you can either run the source directly via `main.py` or recompile the executable using PyInstaller:
+
+```bash
+pip install pyinstaller
+pyinstaller --onefile --windowed --add-data "assets;assets" main.py
+```
 
 ## License and distribution
 
